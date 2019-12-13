@@ -74,19 +74,24 @@ function getWeaterData(request, response) {
   }
 }
 
-app.get('/events', (request, response) => {
-  superagent.get(`http://api.eventful.com/json/events/search?location=${query}&within=25&app_key=${EVENTBRITE_API_KEY}`).then(res => {
-    let events = JSON.parse(res.text);
-    let moreEvents = events.events.event
-    let eventData = moreEvents.map(event => {
-      return new Event(event.url, event.title, event.start_time, event.description)
+
+function getEventData(request, response) {
+  try {
+    superagent.get(`http://api.eventful.com/json/events/search?location=${query}&within=25&app_key=${EVENTBRITE_API_KEY}`).then(res => {
+      let events = JSON.parse(res.text);
+      let moreEvents = events.events.event
+      let eventData = moreEvents.map(event => {
+        return new Event(event.url, event.title, event.start_time, event.description)
+      })
+      response.send(eventData);
+    }).catch(function (error) {
+      console.error(error);
+      return null;
     })
-    response.send(eventData);
-  }).catch(function (error) {
-    console.error(error);
-    return null;
-  })
-})
+  } catch (error) {
+    errorHandler(error, response);
+  }
+}
 
 
 function getGeoData(request, response) {
@@ -114,10 +119,10 @@ function createDataFromAPI(request, response, query) {
       locationSubmitted = new Geolocation(query, formAddr, location.lat, location.lng, countryCode);
       const sqlValu = [locationSubmitted.searchquery, locationSubmitted.formatted_query, locationSubmitted.latitude, locationSubmitted.longitude, locationSubmitted.region];
       const SQL = `INSERT INTO cityLocation(
-      searchQuery, formatted_query, latitude, longitude, region
-      ) VALUES (
-        $1, $2, $3, $4, $5
-        )`;
+        searchQuery, formatted_query, latitude, longitude, region
+        ) VALUES (
+          $1, $2, $3, $4, $5
+          )`;
       client.query(SQL, sqlValu);
       response.send(locationSubmitted);
     })
@@ -152,7 +157,10 @@ app.get('/location', getGeoData);
 // WEATHER PATH
 app.get('/weather', getWeaterData);
 
-// MOVIEs PAth
+// EVENT PATH
+app.get('/events', getEventData);
+
+// MOVIES PATH
 app.get('/movies', getMovieData);
 
 app.listen(PORT, () => {
