@@ -3,237 +3,33 @@
 const PORT = process.env.PORT || 3000;
 const express = require('express');
 const cors = require('cors');
-const superagent = require('superagent');
-const pg = require('pg');
 require('dotenv').config();
 const app = express();
 app.use(cors());
+const utils = require('./modules/util')
+const geoData = require('./modules/location')
+const weatherData = require('./modules/weather')
+const eventData = require('./modules/events')
+const movieData = require('./modules/movies')
+const yelpData = require('./modules/yelp')
 
-// GLOBAL VARIABLES
-const GEOCODE_API_KEY = process.env.GEOCODE_API_KEY;
-const WEATHER_API_KEY = process.env.DARKSKY_API_KEY;
-const EVENTFUL_API_KEY = process.env.EVENTFUL_API_KEY;
-const DATABASE_URL = process.env.DATABASE_URL;
-const MOVIE_API_KEY = process.env.MOVIE_API_KEY;
-const YELP_API_KEY = process.env.YELP_API_KEY;
-
-const client = new pg.Client(`${DATABASE_URL}`);
-client.on('error', error => console.log(error));
-client.connect();
-
-
-// LOCATION CONSTRUCTOR FUNCTION
-function Geolocation(search_query, formAddr, lat, lng, region) {
-  this.search_query = search_query;
-  this.formatted_query = formAddr;
-  this.latitude = lat;
-  this.longitude = lng;
-  this.region = region;
-}
-
-// Event CONSTRUCTOR FUNCTION
-function Event(link, name, event_date, summary = 'none') {
-  this.link = link;
-  this.name = name;
-  this.event_date = event_date.toDateString().split('T')[0];
-  this.summary = summary;
-}
-
-// FORECAST CONSTRUCTOR FUNCTION
-function Forecast(summary, time) {
-  this.forecast = summary;
-  this.time = (new Date(time * 1000)).toDateString();
-}
-
-//MOVIES CONSTRUCTOR FUNCTION
-function Movies(movie) {
-  this.title = movie.title;
-  this.overview = movie.overview;
-  this.average_votes = movie.vote_average;
-  this.total_votes = movie.vote_count;
-  this.image_url = `https://image.tmdb.org/t/p/w500/${movie.poster_path}`;
-  this.popularity = movie.popularity;
-  this.released_on = movie.released_date;
-}
-
-//YELP CONSTRUCTOR FUNCTION
-function Resturants(resturant) {
-  this.name = resturant.name;
-  this.image_url = resturant.image_url;
-  this.price = resturant.price;
-  this.rating = resturant.rating;
-  this.url = resturant.url;
-}
+utils.client.on('error', error => console.log(error));
+utils.client.connect();
 
 // LOCATION PATH
-app.get('/location', getGeoData);
+app.get('/location', geoData);
 
 // WEATHER PATH
-app.get('/weather', getWeaterData);
+app.get('/weather', weatherData);
 
 // EVENT PATH
-app.get('/events', getEventData);
+app.get('/events', eventData);
 
 // MOVIES PATH
-app.get('/movies', getMovieData);
+app.get('/movies', movieData);
 
 // YELP PATH
-app.get('/yelp', getYelpData);
-
-function getGeoData(geoReq, geoRes) {
-  const query = geoReq.query.data;
-  try {
-    const sql = 'SELECT * FROM cityLocation WHERE search_query = $1';
-    client.query(sql, [query]).then(sqlResponse => {
-      if (sqlResponse.rowCount > 0) {
-        geoRes.send(sqlResponse.rows[0]);
-      } else {
-        getGeoDataFromAPI(geoReq, geoRes);
-      }
-    })
-  } catch (error) {
-    errorHandler(error, geoRes);
-  }
-}
-
-function getGeoDataFromAPI(geoDataAPIReq, geoDataAPIRes) {
-  try {
-    superagent.get(`https://maps.googleapis.com/maps/api/geocode/json?address=${geoDataAPIReq.query.data}&key=${GEOCODE_API_KEY}`).then(geoResponse => {
-      const location = geoResponse.body.results[0].geometry.location;
-      const formAddr = geoResponse.body.results[0].formatted_address;
-      const countryCode = geoResponse.body.results[0].address_components[3].short_name;
-      const locationSubmitted = new Geolocation(geoDataAPIReq.query.data, formAddr, location.lat, location.lng, countryCode);
-      const sqlValu = [locationSubmitted.search_query, locationSubmitted.formatted_query, locationSubmitted.latitude, locationSubmitted.longitude, locationSubmitted.region];
-      const SQL = `INSERT INTO cityLocation(
-        search_query, formatted_query, latitude, longitude, region
-        ) VALUES (
-          $1, $2, $3, $4, $5
-          )`;
-      client.query(SQL, sqlValu);
-      geoDataAPIRes.send(locationSubmitted);
-    })
-  } catch (error) {
-    errorHandler(error, geoDataAPIRes);
-  }
-}
-
-function getWeaterData(weatherReq, weatherRep) {
-  try {
-    const sql = 'SELECT weather.* FROM weather JOIN cityLocation ON weather.searchId = cityLocation.id WHERE cityLocation.search_query = $1';
-    client.query(sql, [weatherReq.query.data.search_query]).then(sqlResponse => {
-      if (sqlResponse.rowCount > 0) {
-        const data = sqlResponse.rows.map(daily => new Forecast(daily.summary, daily.time));
-        weatherRep.send(data);
-      } else {
-        getWeaterDataFromAPI(weatherReq, weatherRep);
-      }
-    })
-  } catch (error) {
-    errorHandler(error, weatherRep);
-  }
-}
-
-function getWeaterDataFromAPI(weatherReq, weatherRep) {
-  try {
-    const sql = 'SELECT * FROM cityLocation WHERE search_query = $1';
-    client.query(sql, [weatherReq.query.data.search_query]).then(sqlResponse => {
-      superagent.get(`https://api.darksky.net/forecast/${WEATHER_API_KEY}/${sqlResponse.rows[0].latitude},${sqlResponse.rows[0].longitude}`).then(sqlRes => {
-        const weatherArr = sqlRes.body.daily.data
-        const reply = weatherArr.map(byDay => {
-          const sqlValu = [sqlResponse.rows[0].id, byDay.summary, byDay.time];
-          const SQL = `INSERT INTO weather(
-            searchid, summary, time
-            ) VALUES (
-              $1, $2, $3
-              )`;
-          client.query(SQL, sqlValu);
-          return new Forecast(byDay.summary, byDay.time);
-        })
-        weatherRep.send(reply);
-      })
-    })
-  } catch (error) {
-    errorHandler(error, weatherRep);
-  }
-}
-
-function getEventData(eventReq, eventRes) {
-  try {
-    const sql = 'SELECT events.* FROM events JOIN cityLocation ON events.searchId = cityLocation.id WHERE cityLocation.search_query = $1';
-    client.query(sql, [eventReq.query.data.search_query]).then(sqlResponse => {
-      if (sqlResponse.rowCount > 0) {
-        const data = sqlResponse.rows.map(event => new Event(event.url, event.title, event.start_time, event.description));
-        eventRes.send(data);
-      } else {
-        getEventDataFromAPI(eventReq, eventRes);
-      }
-    })
-  } catch (error) {
-    errorHandler(error, eventRes);
-  }
-}
-
-
-function getEventDataFromAPI(eventReq, eventRes) {
-  try {
-    const sql = 'SELECT * FROM cityLocation WHERE search_query = $1';
-    client.query(sql, [eventReq.query.data.search_query]).then(sqlResponse => {
-      superagent.get(`http://api.eventful.com/json/events/search?location=${eventReq.query.data.search_query}&within=25&app_key=${EVENTFUL_API_KEY}`).then(res => {
-        let events = JSON.parse(res.text);
-        let moreEvents = events.events.event
-        let eventData = moreEvents.map(event => {
-          const sqlValu = [sqlResponse.rows[0].id, event.url, event.title, event.start_time, event.description];
-          const SQL = `INSERT INTO events(
-            searchid, url, title, start_time, description
-            ) VALUES (
-              $1, $2, $3, $4, $5
-              )`;
-          client.query(SQL, sqlValu);
-          return new Event(event.url, event.title, event.start_time, event.description)
-        })
-        eventRes.send(eventData);
-      }).catch(function (error) {
-        console.error(error);
-        return null;
-      })
-    })
-  } catch (error) {
-    errorHandler(error, eventRes);
-  }
-}
-
-function getMovieData(movieReq, movieRes) {
-  try {
-    const sql = 'SELECT * FROM cityLocation WHERE search_query = $1';
-    client.query(sql, [movieReq.query.data.search_query]).then(sqlResponse => {
-      superagent.get(`https://api.themoviedb.org/3/movie/top_rated?api_key=${MOVIE_API_KEY}&region=${sqlResponse.rows[0].region}`).then(movieDBRes => {
-        const movieList = JSON.parse(movieDBRes.text);
-        const movieArr = movieList.results.map(elem => new Movies(elem));
-        movieRes.send(movieArr);
-      })
-    })
-  } catch (error) {
-    errorHandler(error, movieRes);
-  }
-}
-
-function getYelpData(yelpReq, yelpRes) {
-  try {
-    superagent.get(`https://api.yelp.com/v3/businesses/search?location=${yelpReq.query.data.search_query}&limit=20&sort_by=rating`).set('Authorization', `Bearer ${YELP_API_KEY}`).then(yelpBDRes => {
-      const resturantList = JSON.parse(yelpBDRes.text);
-      console.log('resturantList.businesses :', resturantList.businesses);
-      const resturantResults = resturantList.businesses.map(elem => new Resturants(elem));
-      yelpRes.send(resturantResults);
-    })
-  } catch (error) {
-    errorHandler(error, yelpRes);
-  }
-}
-
-function errorHandler(error, response) {
-  console.error(error);
-  response.status(500).send('Whoops! There is a problem');
-}
+app.get('/yelp', yelpData);
 
 app.listen(PORT, () => {
   console.log(`App is on PORT: ${PORT}`);
