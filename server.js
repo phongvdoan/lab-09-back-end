@@ -12,9 +12,10 @@ app.use(cors());
 // GLOBAL VARIABLES
 const GEOCODE_API_KEY = process.env.GEOCODE_API_KEY;
 const WEATHER_API_KEY = process.env.DARKSKY_API_KEY;
-const EVENTBRITE_API_KEY = process.env.EVENTFUL_API_KEY;
+const EVENTFUL_API_KEY = process.env.EVENTFUL_API_KEY;
 const DATABASE_URL = process.env.DATABASE_URL;
 const MOVIE_API_KEY = process.env.MOVIE_API_KEY;
+const YELP_API_KEY = process.env.YELP_API_KEY;
 
 const client = new pg.Client(`${DATABASE_URL}`);
 client.on('error', error => console.log(error));
@@ -34,7 +35,7 @@ function Geolocation(search_query, formAddr, lat, lng, region) {
 function Event(link, name, event_date, summary = 'none') {
   this.link = link;
   this.name = name;
-  this.event_date = event_date;
+  this.event_date = event_date.toDateString().split('T')[0];
   this.summary = summary;
 }
 
@@ -55,6 +56,15 @@ function Movies(movie) {
   this.released_on = movie.released_date;
 }
 
+//YELP CONSTRUCTOR FUNCTION
+function Resturants(resturant) {
+  this.name = resturant.name;
+  this.image_url = resturant.image_url;
+  this.price = resturant.price;
+  this.rating = resturant.rating;
+  this.url = resturant.url;
+}
+
 // LOCATION PATH
 app.get('/location', getGeoData);
 
@@ -68,7 +78,7 @@ app.get('/events', getEventData);
 app.get('/movies', getMovieData);
 
 // YELP PATH
-// app.get('/yelp', getYelpData);
+app.get('/yelp', getYelpData);
 
 function getGeoData(geoReq, geoRes) {
   const query = geoReq.query.data;
@@ -113,7 +123,6 @@ function getWeaterData(weatherReq, weatherRep) {
     client.query(sql, [weatherReq.query.data.search_query]).then(sqlResponse => {
       if (sqlResponse.rowCount > 0) {
         const data = sqlResponse.rows.map(daily => new Forecast(daily.summary, daily.time));
-        console.log('data :', data);
         weatherRep.send(data);
       } else {
         getWeaterDataFromAPI(weatherReq, weatherRep);
@@ -148,22 +157,48 @@ function getWeaterDataFromAPI(weatherReq, weatherRep) {
   }
 }
 
-
-function getEventData(request, response) {
+function getEventData(eventReq, eventRes) {
   try {
-    superagent.get(`http://api.eventful.com/json/events/search?location=${request.query.data.search_query}&within=25&app_key=${EVENTBRITE_API_KEY}`).then(res => {
-      let events = JSON.parse(res.text);
-      let moreEvents = events.events.event
-      let eventData = moreEvents.map(event => {
-        return new Event(event.url, event.title, event.start_time, event.description)
-      })
-      response.send(eventData);
-    }).catch(function (error) {
-      console.error(error);
-      return null;
+    const sql = 'SELECT events.* FROM events JOIN cityLocation ON events.searchId = cityLocation.id WHERE cityLocation.search_query = $1';
+    client.query(sql, [eventReq.query.data.search_query]).then(sqlResponse => {
+      if (sqlResponse.rowCount > 0) {
+        const data = sqlResponse.rows.map(event => new Event(event.url, event.title, event.start_time, event.description));
+        eventRes.send(data);
+      } else {
+        getEventDataFromAPI(eventReq, eventRes);
+      }
     })
   } catch (error) {
-    errorHandler(error, response);
+    errorHandler(error, eventRes);
+  }
+}
+
+
+function getEventDataFromAPI(eventReq, eventRes) {
+  try {
+    const sql = 'SELECT * FROM cityLocation WHERE search_query = $1';
+    client.query(sql, [eventReq.query.data.search_query]).then(sqlResponse => {
+      superagent.get(`http://api.eventful.com/json/events/search?location=${eventReq.query.data.search_query}&within=25&app_key=${EVENTFUL_API_KEY}`).then(res => {
+        let events = JSON.parse(res.text);
+        let moreEvents = events.events.event
+        let eventData = moreEvents.map(event => {
+          const sqlValu = [sqlResponse.rows[0].id, event.url, event.title, event.start_time, event.description];
+          const SQL = `INSERT INTO events(
+            searchid, url, title, start_time, description
+            ) VALUES (
+              $1, $2, $3, $4, $5
+              )`;
+          client.query(SQL, sqlValu);
+          return new Event(event.url, event.title, event.start_time, event.description)
+        })
+        eventRes.send(eventData);
+      }).catch(function (error) {
+        console.error(error);
+        return null;
+      })
+    })
+  } catch (error) {
+    errorHandler(error, eventRes);
   }
 }
 
@@ -182,20 +217,18 @@ function getMovieData(movieReq, movieRes) {
   }
 }
 
-// function getYelpData(yelpReq, yelpRes) {
-//   try {
-//     const sql = 'SELECT * FROM cityLocation WHERE search_query = $1';
-//     client.query(sql, [query]).then(sqlResponse => {
-//       superagent.get(`https://api.themoviedb.org/3/movie/top_rated?api_key=${MOVIE_API_KEY}&region=${sqlResponse.rows[0].region}`).then(movieDBRes => {
-//         const movieList = JSON.parse(movieDBRes.text);
-//         const movieArr = movieList.results.map(elem => new Movies(elem));
-//         movieRes.send(movieArr);
-//       })
-//     })
-//   } catch (error) {
-//     errorHandler(error, movieRes);
-//   }
-// }
+function getYelpData(yelpReq, yelpRes) {
+  try {
+    superagent.get(`https://api.yelp.com/v3/businesses/search?location=${yelpReq.query.data.search_query}&limit=20&sort_by=rating`).set('Authorization', `Bearer ${YELP_API_KEY}`).then(yelpBDRes => {
+      const resturantList = JSON.parse(yelpBDRes.text);
+      console.log('resturantList.businesses :', resturantList.businesses);
+      const resturantResults = resturantList.businesses.map(elem => new Resturants(elem));
+      yelpRes.send(resturantResults);
+    })
+  } catch (error) {
+    errorHandler(error, yelpRes);
+  }
+}
 
 function errorHandler(error, response) {
   console.error(error);

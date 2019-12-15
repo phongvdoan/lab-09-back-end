@@ -19,8 +19,8 @@ CREATE TABLE IF NOT EXISTS weather(
 
 CREATE TABLE IF NOT EXISTS events(
     searchID INT REFERENCES cityLocation(id),
-    link VARCHAR(255),
-    eventName VARCHAR(255),
-    eventDate DATE,
-    eventDetails TEXT
+    url VARCHAR(255),
+    title VARCHAR(255),
+    start_time DATE,
+    description TEXT
 );
