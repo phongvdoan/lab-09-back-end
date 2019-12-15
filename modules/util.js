@@ -1,3 +1,4 @@
+'use strict';
 const utils = {};
 utils.superagent = require('superagent');
 const pg = require('pg');
