@@ -6,12 +6,13 @@ const cors = require('cors');
 require('dotenv').config();
 const app = express();
 app.use(cors());
-const utils = require('./modules/util')
-const geoData = require('./modules/location')
-const weatherData = require('./modules/weather')
-const eventData = require('./modules/events')
-const movieData = require('./modules/movies')
-const yelpData = require('./modules/yelp')
+const utils = require('./modules/util');
+const geoData = require('./modules/location');
+const weatherData = require('./modules/weather');
+const eventData = require('./modules/events');
+const movieData = require('./modules/movies');
+const yelpData = require('./modules/yelp');
+const trailData = require('./modules/trails')
 
 utils.client.on('error', error => console.log(error));
 utils.client.connect();
@@ -30,6 +31,8 @@ app.get('/movies', movieData);
 
 // YELP PATH
 app.get('/yelp', yelpData);
+
+app.get('/trails', trailData);
 
 app.listen(PORT, () => {
   console.log(`App is on PORT: ${PORT}`);
